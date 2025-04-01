@@ -40,11 +40,8 @@ def extract_of_stat(col):
     L = [stat.strip() for stat in col.text.strip().split('\n') if stat.strip()]
     return [int(num) for stat in L for num in stat.split(' of ')]
 
-# extract information from fight HTML file
-def parse_fight(fight_url):
-    fight_response = requests.get(fight_url)
-    fight_soup = BeautifulSoup(fight_response.content, 'html.parser')
-    columns = fight_soup.find_all('td', class_='b-fight-details__table-col')
+# get entire fight totals for stats
+def get_totals_data(columns):
     # parse col 0 into list of two names
     fighters = [name.strip() for name in columns[0].text.strip().split('\n') if name.strip()]
     # parse col 1 into list of total knockdowns
@@ -65,7 +62,7 @@ def parse_fight(fight_url):
     tot_control = [stat.strip() for stat in columns[9].text.strip().split('\n') if stat.strip()]
     tot_control = [int(minutes) * 60 + int(seconds) for time in tot_control
                    for minutes, seconds in [time.split(":")]]
-    fight_data = {
+    totals_data = {
         "Fighter1": fighters[0], "Fighter2": fighters[1],
         "TotKD_F1": tot_kds[0], "TotKD_F2": tot_kds[1],
         "TotSigStrLand_F1": tot_sigs[0], "TotSigStrLand_F2": tot_sigs[2],
@@ -78,12 +75,62 @@ def parse_fight(fight_url):
         "TotRevs_F1": tot_revs[0], "TotRevs_F2": tot_revs[1],
         "TotCtrl_F1": tot_control[0], "TotCtrl_F2": tot_control[1],
         }
-    return fight_data
+    return totals_data
+
+def get_header_data(fight_soup):
+    # method of victory
+    method = fight_soup.find('i', class_='b-fight-details__text-item_first')
+    method = method.find('i', {'style': 'font-style: normal'}).text.strip()
+    columns = fight_soup.find_all('i', class_='b-fight-details__text-item')
+    # num of rounds in the fight
+    rounds = int(columns[0].text.split("Round:")[-1].strip())
+    # total fight time
+    time_format = columns[2].text.strip()
+    time_format = time_format.split("(")[-1].strip(")").split("-")
+    time_format = [int(length) for length in time_format]
+    tot_time = 0
+    for i in range(rounds-1):
+        tot_time += 60*time_format[i]
+    finish_time = columns[1].text.split("Time:")[-1].strip()
+    minutes, seconds = map(int, finish_time.split(":"))
+    tot_time += 60*minutes + seconds
+    # scorecards (if decision)
+    if ("Decision" in method):
+        scores = columns[4].text.strip()
+        L_score, W_score = int(scores.split()[2]), int(scores.split[4].strip('.'))
+        scores = columns[5].text.strip()
+        L_score += int(scores.split()[2])
+        W_score += int(scores.split()[4].strip('.'))
+        scores = columns[6].text.strip()
+        L_score += int(scores.split()[2])
+        W_score += int(scores.split()[4].strip('.'))
+    else:
+        L_score, W_score = None, None
+    # weight class
+    weight = fight_soup.find('i', class_='b-fight-details__fight-title').text.strip().split(" ")[0]
+    # compile into dict
+    header_data = {
+        "Method": method, "Rounds": rounds, "FightTime": tot_time,
+        "Score_F2": L_score, "Score_F1": W_score, "Weight": weight
+        }
+    return header_data
+
+# extract information from fight HTML file
+def parse_fight(fight_url):
+    fight_response = requests.get(fight_url)
+    fight_soup = BeautifulSoup(fight_response.content, 'html.parser')
+    columns = fight_soup.find_all('td', class_='b-fight-details__table-col')
+    header_data = get_header_data(fight_soup)
+    # fight summary statistics
+    totals_data = get_totals_data(columns)
+    # get number of rounds and round-by-round data
+    
     
 # Logic: grab all fights into a multi-dimensional pandas file 
 all_fights = []
 event_links = get_event_links(BASE_URL)
-for event_link in event_links:
+# have to start at 1 because top event is always upcoming
+for event_link in event_links[1:]:
     fight_links = get_fight_links(event_link)
     for fight_link in fight_links:
         fight_data = parse_fight(fight_link)
