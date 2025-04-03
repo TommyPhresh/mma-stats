@@ -1,6 +1,8 @@
 import requests
 from bs4 import BeautifulSoup
+from datetime import datetime
 import pandas as pd
+
 
 # Base URL for UFC events - FightMetric
 BASE_URL = "http://ufcstats.com/statistics/events/completed?page=all"
@@ -96,18 +98,26 @@ def get_header_data(fight_soup):
     tot_time += 60*minutes + seconds
     # scorecards (if decision)
     if ("Decision" in method):
-        scores = columns[4].text.strip()
-        L_score, W_score = int(scores.split()[2]), int(scores.split()[4].strip('.'))
-        scores = columns[5].text.strip()
-        L_score += int(scores.split()[2])
-        W_score += int(scores.split()[4].strip('.'))
-        scores = columns[6].text.strip()
-        L_score += int(scores.split()[2])
-        W_score += int(scores.split()[4].strip('.'))
+        try:
+            scores = columns[4].text.strip()
+            L_score, W_score = int(scores.split()[2]), int(scores.split()[4].strip('.'))
+            scores = columns[5].text.strip()
+            L_score += int(scores.split()[2])
+            W_score += int(scores.split()[4].strip('.'))
+            scores = columns[6].text.strip()
+            L_score += int(scores.split()[2])
+            W_score += int(scores.split()[4].strip('.'))
+        except:
+            L_score, W_score = None, None
     else:
         L_score, W_score = None, None
     # weight class
-    weight = fight_soup.find('i', class_='b-fight-details__fight-title').text.strip().split(" ")[0]
+    weight = fight_soup.find('i', class_='b-fight-details__fight-title').text.strip().split(" ")
+    for word in weight:
+        if "weight" in word:
+            weight = word
+            break
+        
     # compile into dict
     header_data = {
         "Method": method, "Rounds": rounds, "FightTime": tot_time,
@@ -234,11 +244,19 @@ def parse_fight(fight_url):
 all_fights = []
 event_links = get_event_links(BASE_URL)
 # have to start at 1 because first event is always next event (not completed)
-for event_link in event_links[1:]:
-    fight_links = get_fight_links(event_link)
+for i in range(1, len(event_links)):
+    fight_links = get_fight_links(event_links[i])
+    event_response = requests.get(event_links[i])
+    event_soup = BeautifulSoup(event_response.content, 'html.parser')
+    event_date = event_soup.find('li', class_='b-list__box-list-item')
+    event_date = event_date.text.split("Date:")[-1].strip()
+    print(event_date)
+    event_date = datetime.strptime(event_date, "%B %d, %Y")
     for fight_link in fight_links:
         fight_data = parse_fight(fight_link)
+        fight_data["Date"] =  event_date
         all_fights.append(fight_data)
+        
 
 df = pd.DataFrame(all_fights)
 df.to_csv('ufc_fight_data.csv', index=False)
