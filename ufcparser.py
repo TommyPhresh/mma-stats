@@ -62,8 +62,12 @@ def get_totals_data(columns):
     tot_revs = extract_int_stat(columns[8])
     # parse col 9 into list of seconds of control time
     tot_control = [stat.strip() for stat in columns[9].text.strip().split('\n') if stat.strip()]
-    tot_control = [int(minutes) * 60 + int(seconds) for time in tot_control
-                   for minutes, seconds in [time.split(":")]]
+    for i in range(len(tot_control)):
+        if ":" in tot_control[i]:
+            minutes, seconds = tot_control[i].split(":")
+            tot_control[i] = int(minutes)*60 + int(seconds)
+        else:
+            tot_control[i] = None
     totals_data = {
         "Fighter1": fighters[0], "Fighter2": fighters[1],
         "TotKD_F1": tot_kds[0], "TotKD_F2": tot_kds[1],
@@ -87,15 +91,20 @@ def get_header_data(fight_soup):
     # num of rounds in the fight
     rounds = int(columns[0].text.split("Round:")[-1].strip())
     # total fight time
-    time_format = columns[2].text.strip()
-    time_format = time_format.split("(")[-1].strip(")").split("-")
-    time_format = [int(length) for length in time_format]
-    tot_time = 0
-    for i in range(rounds-1):
-        tot_time += 60*time_format[i]
     finish_time = columns[1].text.split("Time:")[-1].strip()
     minutes, seconds = map(int, finish_time.split(":"))
+    tot_time = 0
     tot_time += 60*minutes + seconds
+    time_format = columns[2].text.strip()
+    time_format = time_format.split("(")[-1].strip(")").split("-")
+    # error-handling for unlimited time bouts
+    try:
+        time_format = [int(length) for length in time_format]      
+        for i in range(rounds-1):
+            tot_time += 60*time_format[i]
+    except:
+        pass
+    
     # scorecards (if decision)
     if ("Decision" in method):
         try:
@@ -112,15 +121,17 @@ def get_header_data(fight_soup):
     else:
         L_score, W_score = None, None
     # weight class
-    weight = fight_soup.find('i', class_='b-fight-details__fight-title').text.strip().split(" ")
-    for word in weight:
-        if "weight" in word:
-            weight = word
-            break
-        
-    # compile into dict
+    fight_type = fight_soup.find('i', class_='b-fight-details__fight-title').text.strip().split(" ")
+    weight = "open weight"
+    title = False
+    for word in fight_type:
+        if "weight" in word.lower():
+            weight = word.lower()
+        if "title" in word.lower():
+            title = True
+    
     header_data = {
-        "Method": method, "Rounds": rounds, "FightTime": tot_time,
+        "Title": title, "Method": method, "Rounds": rounds, "FightTime": tot_time,
         "JudgesScore_F1": W_score, "JudgesScore_F2": L_score, "Weight": weight
         }
     return header_data
@@ -140,8 +151,12 @@ def get_rounds_data(columns, rounds):
         round_subs = extract_int_stat(columns[start_col + 7])
         round_revs = extract_int_stat(columns[start_col + 8])
         round_ctrl = [stat.strip() for stat in columns[start_col + 9].text.strip().split('\n') if stat.strip()]
-        round_ctrl = [int(minutes) * 60 + int(seconds) for time in round_ctrl
-                   for minutes, seconds in [time.split(":")]]
+        for i in range(len(round_ctrl)):
+            if ":" in round_ctrl[i]:
+                minutes, seconds = round_ctrl[i].split(":")
+                round_ctrl[i] = int(minutes)*60 + int(seconds)
+            else:
+                round_ctrl[i] = None
         rounds_data.update({
             curr_round_str + "KD_F1": round_kds[0], curr_round_str + "KD_F2": round_kds[1],
             curr_round_str + "SigStrLand_F1": round_sigs[0], curr_round_str + "SigStrLand_F2": round_sigs[2],
@@ -221,30 +236,37 @@ def get_rounds_stks_data(columns, start_col, rounds):
 def parse_fight(fight_url):
     fight_response = requests.get(fight_url)
     fight_soup = BeautifulSoup(fight_response.content, 'html.parser')
-    columns = fight_soup.find_all('td', class_='b-fight-details__table-col')
     # fight metadata
     header_data = get_header_data(fight_soup)
-    # fight summary statistics
-    totals_data = get_totals_data(columns)
-    # get number of rounds and round-by-round data
-    rounds = header_data["Rounds"]
-    rounds_data, start_col = get_rounds_data(columns, rounds)
-    # total significant strikes data
-    total_stks_data, start_col = get_total_stks_data(columns, start_col)
-    # round-by-round significant strikes data
-    rounds_stks_data = get_rounds_stks_data(columns, start_col, rounds)
-    # merge into one 'row'
-    datasets = [header_data, totals_data, rounds_data, total_stks_data, rounds_stks_data]
-    fight_data = {}
-    for dataset in datasets:
-        fight_data.update(dataset)
-    return fight_data
-    
+    columns = fight_soup.find_all('td', class_='b-fight-details__table-col')
+    if (len(columns) == 0):
+        fighters = fight_soup.find_all('a', class_='b-link b-fight-details__person-link')
+        fighters = [fighter.text.strip() for fighter in fighters]
+        header_data["Fighter1"], header_data["Fighter2"] = fighters
+        return header_data
+    else:
+        # fight summary statistics
+        totals_data = get_totals_data(columns)
+        # get number of rounds and round-by-round data
+        rounds = header_data["Rounds"]
+        rounds_data, start_col = get_rounds_data(columns, rounds)
+        # total significant strikes data
+        total_stks_data, start_col = get_total_stks_data(columns, start_col)
+        # round-by-round significant strikes data
+        rounds_stks_data = get_rounds_stks_data(columns, start_col, rounds)
+        # merge into one 'row'
+        datasets = [header_data, totals_data, rounds_data, total_stks_data, rounds_stks_data]
+        fight_data = {}
+        for dataset in datasets:
+            fight_data.update(dataset)
+        return fight_data
+
+"""
 # Logic: grab all fights into a multi-dimensional pandas file 
 all_fights = []
 event_links = get_event_links(BASE_URL)
 # have to start at 1 because first event is always next event (not completed)
-for i in range(1, len(event_links)):
+for i in range(len(event_links)):
     fight_links = get_fight_links(event_links[i])
     event_response = requests.get(event_links[i])
     event_soup = BeautifulSoup(event_response.content, 'html.parser')
@@ -260,4 +282,6 @@ for i in range(1, len(event_links)):
 
 df = pd.DataFrame(all_fights)
 df.to_csv('ufc_fight_data.csv', index=False)
+"""
+
 
