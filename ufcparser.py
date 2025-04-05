@@ -262,6 +262,7 @@ def parse_fight(fight_url):
         return fight_data
 
 """
+FOR INITIAL TOTAL DATA PARSE
 # Logic: grab all fights into a multi-dimensional pandas file 
 all_fights = []
 event_links = get_event_links(BASE_URL)
@@ -284,4 +285,29 @@ df = pd.DataFrame(all_fights)
 df.to_csv('ufc_fight_data.csv', index=False)
 """
 
+# run after event concludes to add its stats to the database
+def update():
+    curr_data = pd.read_csv("ufc_fight_data.csv")
+    event_fights = []
+    event_links = get_event_links(BASE_URL)
+    # most recent event will become 'solidified'
+    # new event_links[0] will be next upcoming event 
+    last_event = event_links[1]
+    fight_links = get_fight_links(last_event)
+    event_response = requests.get(last_event)
+    event_soup = BeautifulSoup(event_response.content, 'html.parser')
+    event_date = event_soup.find('li', class_='b-list__box-list-item')
+    event_date = event_date.text.split("Date:")[-1].strip()
+    print("Adding last event, dated: ", event_date)
+    event_date = datetime.strptime(event_date, "%B %d, %Y")
+    fight_count = 0
+    for fight_link in fight_links:
+        fight_data = parse_fight(fight_link)
+        fight_data["Date"] = event_date
+        event_fights.append(fight_data)
+        fight_count += 1
+    curr_data.update(event_fights)
+    curr_data.to_csv("ufc_fight_data.csv", index=False)
+    print(count, " fights parsed - master database updated")
+        
 
